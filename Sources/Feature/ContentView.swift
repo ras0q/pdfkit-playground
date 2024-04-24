@@ -10,18 +10,19 @@ public struct ContentView: View {
 }
 
 struct PDFKitView: UIViewRepresentable {
-    private var url: URL
-
-    private var pdfView: PDFView = {
-        let pdfView = PDFView()
-        pdfView.autoScales = true
-        pdfView.displaysPageBreaks = false
-        return pdfView
-    }()
+    private let url: URL
+    private let pdfView: PDFView
 
     init(path: String) {
-        self.url = Bundle.module.url(forResource: path, withExtension: "pdf")!
+        url = Bundle.module.url(
+            forResource: path,
+            withExtension: "pdf"
+        )!
+
+        pdfView = PDFView()
         pdfView.document = PDFDocument(url: url)
+        pdfView.autoScales = true
+        pdfView.displaysPageBreaks = false
     }
 
     func makeUIView(context: Context) -> some UIView {
