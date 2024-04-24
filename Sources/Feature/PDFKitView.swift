@@ -4,111 +4,107 @@ import SwiftUI
 
 struct PDFKitView: UIViewRepresentable {
     private let url: URL
-    private let pdfView: PDFView = {
-        let pdfView = PDFView()
-        pdfView.autoScales = true
-        pdfView.displaysPageBreaks = false
-        return pdfView
-    }()
 
     init(path: String) {
         url = Bundle.module.url(
             forResource: path,
             withExtension: "pdf"
         )!
-        pdfView.document = PDFDocument(url: url)
-
-        let gesture = PencilRecognizer()
-        pdfView.addGestureRecognizer(gesture)
     }
 
-    func makeUIView(context: Context) -> some UIView {
-        pdfView
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        pdfView.displaysPageBreaks = true
+        pdfView.delegate = context.coordinator
+        pdfView.pageOverlayViewProvider = context.coordinator
+
+        let document = PDFDocument(url: url)
+        document?.delegate = context.coordinator
+        pdfView.document = document
+
+        return pdfView
     }
 
-    func updateUIView(_ uiView: UIViewType, context: Context) {}
+    func updateUIView(_ pdfView: PDFView, context: Context) {}
+
+    func makeCoordinator() -> CanvasPDFCoordinator {
+        Coordinator()
+    }
 }
 
-class PencilRecognizer: UIGestureRecognizer {
-    var pdfView: PDFView {
-        view as! PDFView
+class CanvasPDFCoordinator: UIView {
+    var pageToViewMapping = [PDFPage: PKCanvasView]()
+}
+
+extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
+    func pdfView(_ pdfView: PDFView, overlayViewFor page: PDFPage) -> UIView? {
+        pageToViewMapping[page] ?? {
+            // FIXME: 一番最後にvisibleになったページにしか書き込めない
+            // FIXME: 進んで戻ると消えてる
+            let canvasView = PKCanvasView(frame: page.bounds(for: pdfView.displayBox))
+            canvasView.drawingPolicy = .anyInput
+            canvasView.backgroundColor = .clear
+            canvasView.isOpaque = true
+            canvasView.clipsToBounds = false
+            canvasView.becomeFirstResponder()
+            pdfView.addGestureRecognizer(canvasView.drawingGestureRecognizer)
+
+            // FIXME: 表示されない
+            let picker = PKToolPicker()
+            picker.setVisible(true, forFirstResponder: canvasView)
+            picker.addObserver(canvasView)
+
+            pageToViewMapping[page] = canvasView
+
+            return canvasView
+        }()
     }
-    var path: UIBezierPath?
-    var currentPage: PDFPage?
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard
-            touches.first?.type == .pencil,
-            event.allTouches?.count == 1,
-            let location = touches.first?.location(in: pdfView),
-            let page = pdfView.page(for: location, nearest: true)
-        else {
-            state = .failed
-            return
-        }
-
-        state = .began
-        currentPage = page
-
-        let convertedPoint = pdfView.convert(location, to: page) // TODO: correct?
-        let newPath = UIBezierPath()
-        newPath.move(to: convertedPoint)
-        path = newPath
-    }
-
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard
-            let location = touches.first?.location(in: pdfView),
-            let page = currentPage,
-            let path
-        else {
-            state = .failed
-            return
-        }
-
-        state = .changed
-
-        let convertedPoint = pdfView.convert(location, to: page)
-        path.addLine(to: convertedPoint)
-        path.move(to: convertedPoint)
-
-        let annotation = PDFAnnotation(
-            bounds: page.bounds(for: pdfView.displayBox),
-            forType: .ink,
+    func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage) {
+        // FIXME: not visibleになる際にPDFに書き込もうとしているがうまくいかない
+        guard let drawing = (page as? CanvasPDFPage)?.drawing else { return }
+        let annotation = CanvasPDFAnnotation(
+            bounds: drawing.bounds,
+            forType: .stamp,
             withProperties: nil
         )
-        annotation.color = .red
-        annotation.add(path)
+        let codedData = try! NSKeyedArchiver.archivedData(
+            withRootObject: drawing,
+            requiringSecureCoding: true
+        )
+        annotation.setValue(
+            codedData,
+            forAnnotationKey: PDFAnnotationKey(rawValue: "drawingData")
+        ) // TODO: what?
+
         page.addAnnotation(annotation)
     }
+}
 
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard
-            let location = touches.first?.location(in: pdfView),
-            let page = currentPage,
-            let path
-        else {
-            state = .failed
-            return
+extension CanvasPDFCoordinator: PDFViewDelegate {}
+
+extension CanvasPDFCoordinator: PDFDocumentDelegate {
+    func classForPage() -> AnyClass {
+        CanvasPDFPage.self
+    }
+}
+
+class CanvasPDFPage: PDFPage {
+    var drawing: PKDrawing? = nil
+}
+
+class CanvasPDFAnnotation: PDFAnnotation {
+    override func draw(with box: PDFDisplayBox, in context: CGContext) {
+        UIGraphicsPushContext(context) // TODO: what?
+        context.saveGState()
+
+        if let drawing = (page as? CanvasPDFPage)?.drawing {
+            let image = drawing.image(from: drawing.bounds, scale: 1)
+            image.draw(in: drawing.bounds)
         }
 
-        state = .ended
-
-        let convertedPoint = pdfView.convert(location, to: page)
-        path.addLine(to: convertedPoint)
-        path.move(to: convertedPoint)
-
-        let annotation = PDFAnnotation(
-            bounds: page.bounds(for: pdfView.displayBox),
-            forType: .ink,
-            withProperties: nil
-        )
-        annotation.color = .orange
-        annotation.add(path)
-        page.addAnnotation(annotation)
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        state = .cancelled
+        context.restoreGState()
+        UIGraphicsPopContext()
     }
 }
