@@ -3,18 +3,13 @@ import PDFKit
 import SwiftUI
 
 struct PDFKitView: UIViewRepresentable {
-    private let url: URL
+    @Binding private var url: URL
 
-    init(path: String) {
-        url = Bundle.module.url(
-            forResource: path,
-            withExtension: "pdf"
-        )!
+    init(url: Binding<URL>) {
+        _url = url
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let rootView = UIView()
-
+    func makeUIView(context: Context) -> PDFView {
         let pdfView = CanvasPDFView()
         pdfView.autoScales = true
         pdfView.displaysPageBreaks = true
@@ -25,36 +20,37 @@ struct PDFKitView: UIViewRepresentable {
         document?.delegate = context.coordinator
         pdfView.document = document
 
-        rootView.addSubview(pdfView)
-        pdfView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            pdfView.topAnchor.constraint(equalTo: rootView.topAnchor),
-            pdfView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
-            pdfView.leftAnchor.constraint(equalTo: rootView.leftAnchor),
-            pdfView.rightAnchor.constraint(equalTo: rootView.rightAnchor)
-        ])
-
-
         // MARK: workaround to display PKToolPicker
         let emptyCanvasView = PKCanvasView()
+        context.coordinator.emptyCanvasView = emptyCanvasView
         emptyCanvasView.isHidden = true
         pdfView.toolPicker.addObserver(emptyCanvasView)
         pdfView.toolPicker.setVisible(true, forFirstResponder: emptyCanvasView)
         emptyCanvasView.becomeFirstResponder()
 
-        rootView.addSubview(emptyCanvasView)
+        pdfView.addSubview(emptyCanvasView)
 
-        return rootView
+        return pdfView
     }
 
-    func updateUIView(_ view: UIView, context: Context) {}
+    func updateUIView(_ pdfView: PDFView, context: Context) {
+        Task {
+            guard let emptyCanvasView = context.coordinator.emptyCanvasView else { return }
+            let document = PDFDocument(url: url)
+            document?.delegate = context.coordinator
+            pdfView.document = document
+            emptyCanvasView.becomeFirstResponder()
+        }
+    }
 
     func makeCoordinator() -> CanvasPDFCoordinator {
         Coordinator()
     }
 }
 
-class CanvasPDFCoordinator: NSObject {}
+class CanvasPDFCoordinator: NSObject {
+    var emptyCanvasView: PKCanvasView?
+}
 
 extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
     func pdfView(_ pdfView: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -80,6 +76,10 @@ extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
             return canvasView
         }()
 
+        if let drawing = page.drawing {
+            canvasView.drawing = drawing
+        }
+
         return canvasView
     }
 
@@ -92,6 +92,14 @@ extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
         }
 
         page.drawing  = overlayView.drawing
+
+        if
+            let document = pdfView.document,
+            let data = document.dataRepresentation(),
+            let documentURL = document.documentURL
+        {
+            try? data.write(to: documentURL)
+        }
     }
 }
 
