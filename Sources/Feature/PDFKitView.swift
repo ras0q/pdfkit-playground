@@ -16,18 +16,12 @@ struct PDFKitView: UIViewRepresentable {
         pdfView.delegate = context.coordinator
         pdfView.pageOverlayViewProvider = context.coordinator
 
-        let document = PDFDocument(url: url)
-        document?.delegate = context.coordinator
-        pdfView.document = document
-
         // MARK: workaround to display PKToolPicker
         let emptyCanvasView = PKCanvasView()
-        context.coordinator.emptyCanvasView = emptyCanvasView
         emptyCanvasView.isHidden = true
+        context.coordinator.emptyCanvasView = emptyCanvasView
         pdfView.toolPicker.addObserver(emptyCanvasView)
         pdfView.toolPicker.setVisible(true, forFirstResponder: emptyCanvasView)
-        emptyCanvasView.becomeFirstResponder()
-
         pdfView.addSubview(emptyCanvasView)
 
         return pdfView
@@ -91,15 +85,7 @@ extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
             return
         }
 
-        page.drawing  = overlayView.drawing
-
-        if
-            let document = pdfView.document,
-            let data = document.dataRepresentation(),
-            let documentURL = document.documentURL
-        {
-            try? data.write(to: documentURL)
-        }
+        page.drawing = overlayView.drawing
     }
 }
 
