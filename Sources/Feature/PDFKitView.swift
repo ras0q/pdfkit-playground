@@ -24,6 +24,12 @@ struct PDFKitView: UIViewRepresentable {
             let document = PDFDocument(url: url)
             document?.delegate = context.coordinator
             pdfView.document = document
+
+            // MARK: workaround to display PKToolPicker
+            // When annotating a PDF file, the PDFDocumentView becomes the first responder.
+            pdfView.recursiveSubviews
+                .filter { "\(type(of: $0))" == "PDFDocumentView" }
+                .forEach { context.coordinator.toolPicker.setVisible(true, forFirstResponder: $0) }
         }
     }
 
@@ -32,7 +38,9 @@ struct PDFKitView: UIViewRepresentable {
     }
 }
 
-class CanvasPDFCoordinator: NSObject {}
+class CanvasPDFCoordinator: NSObject {
+    var toolPicker = PKToolPicker()
+}
 
 extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
     func pdfView(_ pdfView: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -52,12 +60,7 @@ extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
 
             pdfView.addGestureRecognizer(canvasView.drawingGestureRecognizer)
             pdfView.pageToViewMapping[page] = canvasView
-            pdfView.toolPicker.addObserver(canvasView)
-            // MARK: workaround to display PKToolPicker
-            // When annotating a PDF file, the PDFDocumentView becomes the first responder.
-            pdfView.recursiveSubviews
-                .filter { "\(type(of: $0))" == "PDFDocumentView" }
-                .forEach { pdfView.toolPicker.setVisible(true, forFirstResponder: $0) }
+            toolPicker.addObserver(canvasView)
 
             return canvasView
         }()
@@ -97,7 +100,6 @@ extension UIView {
 
 class CanvasPDFView: PDFView {
     var pageToViewMapping = [PDFPage: PKCanvasView]()
-    var toolPicker = PKToolPicker()
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let hitPage = page(for: point, nearest: true) {
