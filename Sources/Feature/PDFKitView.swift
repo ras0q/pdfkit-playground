@@ -22,7 +22,6 @@ struct PDFKitView: UIViewRepresentable {
     func updateUIView(_ pdfView: PDFView, context: Context) {
         Task {
             let document = PDFDocument(url: url)
-            document?.delegate = context.coordinator
             pdfView.document = document
 
             // MARK: workaround to display PKToolPicker
@@ -48,15 +47,13 @@ class CanvasPDFCoordinator: NSObject {
 
 extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
     func pdfView(_ pdfView: PDFView, overlayViewFor page: PDFPage) -> UIView? {
-        guard 
-            let pdfView = (pdfView as? CanvasPDFView),
-            let page = (page as? CanvasPDFPage)
-        else {
+        guard let pdfView = (pdfView as? CanvasPDFView) else {
             return nil
         }
 
         let canvasView = pdfView.pageToViewMapping[page] ?? {
             let canvasView = PKCanvasView(frame: .zero)
+            canvasView.delegate = pdfView
             canvasView.drawingPolicy = .pencilOnly
             canvasView.backgroundColor = .clear
             canvasView.isOpaque = true
@@ -69,32 +66,11 @@ extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
             return canvasView
         }()
 
-        if let drawing = page.drawing {
-            canvasView.drawing = drawing
-        }
-
         return canvasView
-    }
-
-    func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage) {
-        guard 
-            let overlayView = (overlayView as? PKCanvasView),
-            let page = (page as? CanvasPDFPage)
-        else {
-            return
-        }
-
-        page.drawing = overlayView.drawing
     }
 }
 
 extension CanvasPDFCoordinator: PDFViewDelegate {}
-
-extension CanvasPDFCoordinator: PDFDocumentDelegate {
-    func classForPage() -> AnyClass {
-        CanvasPDFPage.self
-    }
-}
 
 class CanvasPDFView: PDFView {
     var pageToViewMapping = [PDFPage: PKCanvasView]()
@@ -109,6 +85,59 @@ class CanvasPDFView: PDFView {
     }
 }
 
-class CanvasPDFPage: PDFPage {
-    var drawing: PKDrawing? = nil
+extension CanvasPDFView: PKCanvasViewDelegate {
+    func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+        guard
+            let page = pageToViewMapping.first(where: { $0.value == canvasView })?.key,
+            let newStroke = canvasView.drawing.strokes.last
+        else {
+            return
+        }
+        print("writing to \(page.label!), strokes: \(canvasView.drawing.strokes.count)")
+
+        let newDrawing = PKDrawing(strokes: [newStroke])
+        let newAnnotation = CanvasPDFAnnotation(pkDrawing: newDrawing, bounds: page.bounds(for: .mediaBox))
+        page.addAnnotation(newAnnotation)
+
+        guard
+            let data = document?.dataRepresentation(),
+            let documentURL = document?.documentURL
+        else {
+            return
+        }
+
+//        try? data.write(to: documentURL)
+        print("wrote!", data, documentURL)
+    }
+}
+
+class CanvasPDFAnnotation: PDFAnnotation {
+    let pkDrawing: PKDrawing
+
+    init(pkDrawing: PKDrawing, bounds: CGRect) {
+        self.pkDrawing = pkDrawing
+        super.init(bounds: bounds, forType: .stamp, withProperties: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // FIXME: This is called more than necessary.
+    override func draw(with box: PDFDisplayBox, in context: CGContext) {
+        UIGraphicsPushContext(context)
+        context.saveGState()
+
+        // MARK: Y-flip (M' = Scale * Transform * M)
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1.0, y: -1.0)
+        print("bounds", pkDrawing.bounds)
+
+        // MARK: Using smaller `scale` reduces resolution.
+        let image = pkDrawing.image(from: pkDrawing.bounds, scale: 2.0)
+        image.draw(in: pkDrawing.bounds)
+
+        context.restoreGState()
+        UIGraphicsPopContext()
+    }
 }
