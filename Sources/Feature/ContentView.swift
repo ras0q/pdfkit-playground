@@ -10,7 +10,13 @@ public struct ContentView: View {
     public init() {}
 
     public var body: some View {
-        PDFKitView(url: $pdfURL)
+        ZStack(alignment: .topLeading) {
+            PDFKitView(url: $pdfURL)
+            Button("Open") {
+                isImporterPresented = true
+            }
+            .buttonStyle(.bordered)
+        }
             .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.pdf]) { result in
                 switch result {
                 case let .success(url):
