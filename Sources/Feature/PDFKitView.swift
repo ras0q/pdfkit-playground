@@ -16,24 +16,14 @@ struct PDFKitView: UIViewRepresentable {
         pdfView.delegate = context.coordinator
         pdfView.pageOverlayViewProvider = context.coordinator
 
-        // MARK: workaround to display PKToolPicker
-        let emptyCanvasView = PKCanvasView()
-        emptyCanvasView.isHidden = true
-        context.coordinator.emptyCanvasView = emptyCanvasView
-        pdfView.toolPicker.addObserver(emptyCanvasView)
-        pdfView.toolPicker.setVisible(true, forFirstResponder: emptyCanvasView)
-        pdfView.addSubview(emptyCanvasView)
-
         return pdfView
     }
 
     func updateUIView(_ pdfView: PDFView, context: Context) {
         Task {
-            guard let emptyCanvasView = context.coordinator.emptyCanvasView else { return }
             let document = PDFDocument(url: url)
             document?.delegate = context.coordinator
             pdfView.document = document
-            emptyCanvasView.becomeFirstResponder()
         }
     }
 
@@ -42,9 +32,7 @@ struct PDFKitView: UIViewRepresentable {
     }
 }
 
-class CanvasPDFCoordinator: NSObject {
-    var emptyCanvasView: PKCanvasView?
-}
+class CanvasPDFCoordinator: NSObject {}
 
 extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
     func pdfView(_ pdfView: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -61,11 +49,15 @@ extension CanvasPDFCoordinator: PDFPageOverlayViewProvider {
             canvasView.backgroundColor = .clear
             canvasView.isOpaque = true
             canvasView.clipsToBounds = false
-            canvasView.tool = PKInkingTool(.pen, color: .systemRed, width: 5)
 
             pdfView.addGestureRecognizer(canvasView.drawingGestureRecognizer)
             pdfView.pageToViewMapping[page] = canvasView
             pdfView.toolPicker.addObserver(canvasView)
+            // MARK: workaround to display PKToolPicker
+            // When annotating a PDF file, the PDFDocumentView becomes the first responder.
+            pdfView.recursiveSubviews
+                .filter { "\(type(of: $0))" == "PDFDocumentView" }
+                .forEach { pdfView.toolPicker.setVisible(true, forFirstResponder: $0) }
 
             return canvasView
         }()
@@ -94,6 +86,12 @@ extension CanvasPDFCoordinator: PDFViewDelegate {}
 extension CanvasPDFCoordinator: PDFDocumentDelegate {
     func classForPage() -> AnyClass {
         CanvasPDFPage.self
+    }
+}
+
+extension UIView {
+    var recursiveSubviews: [UIView] {
+        subviews + subviews.flatMap { $0.recursiveSubviews }
     }
 }
 
