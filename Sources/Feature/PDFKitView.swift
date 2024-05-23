@@ -27,7 +27,7 @@ struct PDFKitView: UIViewRepresentable {
 
             // MARK: workaround to display PKToolPicker
             // When annotating a PDF file, the PDFDocumentView becomes the first responder.
-            pdfView.recursiveSubviews
+            recursiveSubviews(root: pdfView)
                 .filter { "\(type(of: $0))" == "PDFDocumentView" }
                 .forEach { context.coordinator.toolPicker.setVisible(true, forFirstResponder: $0) }
         }
@@ -35,6 +35,10 @@ struct PDFKitView: UIViewRepresentable {
 
     func makeCoordinator() -> CanvasPDFCoordinator {
         Coordinator()
+    }
+
+    private func recursiveSubviews(root: UIView) -> [UIView] {
+        root.subviews + root.subviews.flatMap { recursiveSubviews(root: $0) }
     }
 }
 
@@ -89,12 +93,6 @@ extension CanvasPDFCoordinator: PDFViewDelegate {}
 extension CanvasPDFCoordinator: PDFDocumentDelegate {
     func classForPage() -> AnyClass {
         CanvasPDFPage.self
-    }
-}
-
-extension UIView {
-    var recursiveSubviews: [UIView] {
-        subviews + subviews.flatMap { $0.recursiveSubviews }
     }
 }
 
