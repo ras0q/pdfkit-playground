@@ -3,7 +3,7 @@ import SwiftUI
 public struct ContentView: View {
     @State private var isImporterPresented: Bool = true
     @State private var pdfURL: URL = Bundle.module.url(
-        forResource: "1706.03762",
+        forResource: "sample",
         withExtension: "pdf"
     )!
 
